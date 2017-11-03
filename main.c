@@ -1,10 +1,3 @@
-// SimpleHTTPServer.cpp
-// 功能：实现简单的web服务器功能，能同时响应多个浏览器的请求：
-//       1、如果该文件存在，则在浏览器上显示该文件；
-//       2、如果文件不存在，则返回404-file not found页面
-//       3、只支持GET、HEAD方法
-// HTTP1.1 与 1.0不同，默认是持续连接的(keep-alive)
-
 #include <Winsock2.h>
 #include <stdio.h>
 #include <string.h>
@@ -24,7 +17,7 @@ char url[MIN_BUF];
 char path[_MAX_PATH];
 
 void ProcessRequst(SOCKET sAccept);
-int file_not_found(SOCKET sAccept);
+int file_not_found(SOCKET sAccept, long flen);
 int file_ok(SOCKET sAccept, long flen);
 int send_file(SOCKET sAccept, FILE *resource);
 int send_not_found(SOCKET sAccept);
@@ -134,7 +127,7 @@ void ProcessRequst(SOCKET sAccept)
     // 没有该文件则发送一个简单的404-file not found的html页面，并断开本次连接
     if(resource==NULL)
     {
-        file_not_found(sAccept);
+        file_not_found(sAccept,strlen(FileNotFoundPage));
         // 如果method是GET，则发送自定义的file not found页面
         if(0 == stricmp(method, "GET"))
             send_not_found(sAccept);
@@ -195,7 +188,7 @@ int file_ok(SOCKET sAccept, long flen)
 }
 
 // 发送404 file_not_found报头
-int file_not_found(SOCKET sAccept)
+int file_not_found(SOCKET sAccept, long flen)
 {
     char send_buf[MIN_BUF];
 //  time_t timep;
@@ -207,6 +200,8 @@ int file_not_found(SOCKET sAccept)
     sprintf(send_buf, "Connection: keep-alive\r\n");
     send(sAccept, send_buf, strlen(send_buf), 0);
     sprintf(send_buf, SERVER);
+    send(sAccept, send_buf, strlen(send_buf), 0);
+    sprintf(send_buf, "Content-Length: %ld\r\n", flen);
     send(sAccept, send_buf, strlen(send_buf), 0);
     sprintf(send_buf, "Content-Type: text/html\r\n");
     send(sAccept, send_buf, strlen(send_buf), 0);
