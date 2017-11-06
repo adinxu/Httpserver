@@ -17,48 +17,14 @@ char url[MIN_BUF];
 char path[_MAX_PATH];
 
 void ProcessRequst(SOCKET sAccept);
-int file_not_found(SOCKET sAccept, long flen);
-int file_ok(SOCKET sAccept, long flen);
-int send_file(SOCKET sAccept, FILE *resource);
-int send_not_found(SOCKET sAccept);
-
-const char *FileNotFoundPage=
-"<html>"
-"<head><title>404 not found</title><link rel='icon' href='http://oygwu7lhj.bkt.clouddn.com/favicon.ico' type='image/x-ico' /> </head>"
-"<body bgcolor=\"#FFFFCC\"><br><br><center>"
-"<span style=\"font-size:50px;color:CC9999\">对方给你发送了一个404，并向你扔了一只傻亮</span>"
-"<br><br><br>"
-"<img src=\"http://oygwu7lhj.bkt.clouddn.com/dog.JPEG\" alt=\"dog\">"
-"</center></body>"
-"</html>"
-;
-const char *DefaultPage=
-"<html>"
-"<head><title>Default</title><link rel='icon' href='http://oygwu7lhj.bkt.clouddn.com/favicon.ico' type='image/x-ico' /> </head>"
-"<body bgcolor=\"#70000\"><br><br><br><br><br><br><br>"
-"<center><span style=\"font-size:50px;color:A0A0A0;font-family:century\">你是卿亮吗</span><hr></center>"
-"<br>"
-"<table width=100% height=10%><tr><td><center>"
-"<a href=\"yes\"><button type=\"button\" style=\"height:30px;width:100px;\">yes</button></a>"
-"&nbsp&nbsp&nbsp&nbsp"
-"<a href=\"no\"><button type=\"button\" style=\"height:30px;width:100px;\">no</button></a>"
-"</center></td></tr></table>"
-"</body>"
-"</html>"
-;
-const char *ConfirmPage=
-"<html>"
-"<head><title>Default</title><link rel='icon' href='http://oygwu7lhj.bkt.clouddn.com/favicon.ico' type='image/x-ico' /> </head>"
-"<body bgcolor=\"#FFFFCC\"><center>"
-"<span style=\"font-size:30px;color:000000;font-family:century\">恭喜你发现一只认真学习的傻亮</span>"
-"<br>"
-"<img src=\"http://oygwu7lhj.bkt.clouddn.com/ql.jpg\" alt=\"ql\">"
-"</center></body>"
-"</html>"
-;
+FILE * FindFile(char* url);
+long SendHead(SOCKET sAccept,FILE *resource,char* url);
+int send_file(SOCKET sAccept, FILE *resource,long filelen);
 
 void ProcessRequst(SOCKET sAccept)
 {
+    long filelen;
+    FILE *resource;
     int i, j;
     //example:GET /su?wd=ww&action=opensearch&ie=UTF-8 HTTP/1.1\r\n
     //处理接收数据
@@ -97,64 +63,32 @@ void ProcessRequst(SOCKET sAccept)
     }
     url[i] = '\0';
     printf("url: %s\n",url);
-
     if(1==strlen(url))//默认请求
     {
         printf("send default page\n");
-        file_ok(sAccept, strlen(DefaultPage));
-        send(sAccept, DefaultPage, strlen(DefaultPage), 0);
-        printf("***********************\n\n\n\n");
-        return;
+        sprintf(url,"\\default.html");
     }
-    else if(0 == stricmp(url, "\\yes"))
+    if(resource=FindFile(url))//找到文件
     {
-        printf("send confirm page\n");
-        file_ok(sAccept, strlen(ConfirmPage));
-        send(sAccept, ConfirmPage, strlen(ConfirmPage), 0);
-        printf("***********************\n\n\n\n");
-        return;
+        filelen=SendHead(sAccept,resource,url);
     }
-
-    // 将请求的url路径转换为本地路径
-    _getcwd(path,_MAX_PATH);//获取当前工作路径
-    strcat(path,url);//将两字符串连接
-    printf("path: %s\n",path);
-
-
-    // 打开本地路径下的文件，网络传输中用r文本方式打开会出错
-    FILE *resource = fopen(path,"rb");
-
-    // 没有该文件则发送一个简单的404-file not found的html页面，并断开本次连接
-    if(resource==NULL)
+    else
     {
-        file_not_found(sAccept,strlen(FileNotFoundPage));
-        // 如果method是GET，则发送自定义的file not found页面
-        if(0 == stricmp(method, "GET"))
-            send_not_found(sAccept);
-
-        printf("file not found.\n");
-        printf("***********************\n\n\n\n");
-        return;
+        if(resource=FindFile("\\404.html"))
+        {
+            printf("send not found page\n");
+            filelen=SendHead(sAccept,resource,NULL);
+        }
+        else
+        {
+            printf("an err occur!\n");
+            exit(0);
+        }
     }
-    /*
-    SEEK_SET	档案开头
-    SEEK_CUR	文件指针的当前位置
-    SEEK_END	文件结尾*
-    */
-
-    // 求出文件长度，记得重置文件指针到文件头
-    fseek(resource,0,SEEK_END);
-    long flen=ftell(resource);//返回当前文件读写位置
-    printf("file length: %ld\n", flen);
-    fseek(resource,0,SEEK_SET);
-
-    // 发送200 OK HEAD
-    file_ok(sAccept, flen);
-
     // 如果是GET方法则发送请求的资源
     if(0 == stricmp(method, "GET"))
     {
-        if(0 == send_file(sAccept, resource))
+        if(0 == send_file(sAccept, resource,filelen))
             printf("file send ok.\n");
         else
             printf("file send fail.\n");
@@ -164,76 +98,97 @@ void ProcessRequst(SOCKET sAccept)
 
     return;
 }
-// 发送200 ok报头
-int file_ok(SOCKET sAccept, long flen)
+FILE * FindFile(char* url)
 {
-    char send_buf[MIN_BUF];
-//  time_t timep;
-//  time(&timep);
-    sprintf(send_buf, "HTTP/1.1 200 OK\r\n");
-    send(sAccept, send_buf, strlen(send_buf), 0);
-    sprintf(send_buf, "Connection: keep-alive\r\n");
-    send(sAccept, send_buf, strlen(send_buf), 0);
-//  sprintf(send_buf, "Date: %s\r\n", ctime(&timep));
-//  send(sAccept, send_buf, strlen(send_buf), 0);
-    sprintf(send_buf, SERVER);
-    send(sAccept, send_buf, strlen(send_buf), 0);
-    sprintf(send_buf, "Content-Length: %ld\r\n", flen);
-    send(sAccept, send_buf, strlen(send_buf), 0);
-    sprintf(send_buf, "Content-Type: text/html\r\n");
-    send(sAccept, send_buf, strlen(send_buf), 0);
-    sprintf(send_buf, "\r\n");
-    send(sAccept, send_buf, strlen(send_buf), 0);
-    return 0;
+    // 将请求的url路径转换为本地路径
+    _getcwd(path,_MAX_PATH);//获取当前工作路径
+    strcat(path,url);//将两字符串连接
+    // 打开本地路径下的文件，网络传输中用r文本方式打开会出错
+    printf("path: %s\n",path);
+    FILE *resource = fopen(path,"rb");
+    return resource;
 }
 
-// 发送404 file_not_found报头
-int file_not_found(SOCKET sAccept, long flen)
+long SendHead(SOCKET sAccept,FILE *resource,char* url)
 {
     char send_buf[MIN_BUF];
-//  time_t timep;
-//  time(&timep);
+    //  time_t timep;
+    //  time(&timep);
+    if(url)
+    sprintf(send_buf, "HTTP/1.1 200 OK\r\n");
+    else
     sprintf(send_buf, "HTTP/1.1 404 NOT FOUND\r\n");
     send(sAccept, send_buf, strlen(send_buf), 0);
-//  sprintf(send_buf, "Date: %s\r\n", ctime(&timep));
-//  send(sAccept, send_buf, strlen(send_buf), 0);
     sprintf(send_buf, "Connection: keep-alive\r\n");
     send(sAccept, send_buf, strlen(send_buf), 0);
+    //  sprintf(send_buf, "Date: %s\r\n", ctime(&timep));
+    //  send(sAccept, send_buf, strlen(send_buf), 0);
     sprintf(send_buf, SERVER);
     send(sAccept, send_buf, strlen(send_buf), 0);
+    fseek(resource,0,SEEK_END);
+    long flen=ftell(resource);//返回当前文件读写位置
+    fseek(resource,0,SEEK_SET);
+    printf("file length: %ld\n", flen);
     sprintf(send_buf, "Content-Length: %ld\r\n", flen);
     send(sAccept, send_buf, strlen(send_buf), 0);
-    sprintf(send_buf, "Content-Type: text/html\r\n");
+    if(url)
+    {
+        char* type=strchr(url,'.');
+        type++;
+        printf("file type: %s\n", type);
+        if(!stricmp(type, "ico"))
+        {
+            sprintf(send_buf, "Content-Type: image/vnd.microsoft.icon\r\n");//image/vnd.microsoft.icon\r\n");
+        }
+        else if((!stricmp(type, "JPEG"))||(!stricmp(type, "jpg")))
+        {
+            sprintf(send_buf, "Content-Type: image/jpeg\r\n");
+        }
+        else if(!stricmp(type, "html"))
+        {
+            sprintf(send_buf, "Content-Type: text/html\r\n");
+        }
+        else
+        {
+            printf("unknow type!\n");
+            sprintf(send_buf, "Content-Type: text/html\r\n");
+        }
+    }
+    else
+    {
+        printf("html");
+        sprintf(send_buf, "Content-Type: text/html\r\n");
+    }
+
     send(sAccept, send_buf, strlen(send_buf), 0);
     sprintf(send_buf, "\r\n");
     send(sAccept, send_buf, strlen(send_buf), 0);
-    return 0;
+    return flen;
 }
 
-// 发送自定义的file_not_found页面
-int send_not_found(SOCKET sAccept)
+int send_file(SOCKET sAccept, FILE *resource,long filelen)
 {
-    send(sAccept, FileNotFoundPage, strlen(FileNotFoundPage), 0);
-    return 0;
-}
-
-// 发送请求的资源
-int send_file(SOCKET sAccept, FILE *resource)
-{
+    long result=0;
     char send_buf[BUF_LENGTH];
-    while (1)
+    char flag=0;
+    while (filelen>0)
     {
-        memset(send_buf,0,sizeof(send_buf));       //缓存清0
-        fgets(send_buf, sizeof(send_buf), resource);
-    //  printf("send_buf: %s\n",send_buf);
-        if (SOCKET_ERROR == send(sAccept, send_buf, strlen(send_buf), 0))
+        if(filelen<BUF_LENGTH) flag=1;
+        memset(send_buf,0,BUF_LENGTH);       //缓存清0
+        if(flag)
+        result = fread (send_buf,1,filelen,resource);
+        else
+        result = fread (send_buf,1,BUF_LENGTH,resource);
+        filelen-=result;
+        if (SOCKET_ERROR == send(sAccept, send_buf, result, 0))
         {
             printf("send() Failed:%d\n",WSAGetLastError());
             return USER_ERROR;
         }
-        if(feof(resource))
-        return 0;
+        //printf("sending:%ld\n",result);
     }
+    fclose(resource);
+    return 0;
 }
 
 int main()
@@ -296,8 +251,8 @@ int main()
         printf( "Client PORT：%d \n", ntohs(cli.sin_port));
         while(1)
         {
+            printf("wait to receive\n");
             memset(recv_buf,0,sizeof(recv_buf));
-            printf("wait to rec...\n");
             if ((iResult=recv(sAccept,recv_buf,sizeof(recv_buf),0))<0)   //接收错误
             {
                 printf("recv() Failed:%d\n",WSAGetLastError());
